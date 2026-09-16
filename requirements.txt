@@ -1,11 +1,10 @@
 pandas
 pyarrow
 numpy
-networkx
+networkx>=2.8
 node2vec
 scikit-learn
 umap-learn
-python-louvain
 plotly
 pyvis
 gradio
