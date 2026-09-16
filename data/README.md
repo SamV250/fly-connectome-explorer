@@ -15,6 +15,9 @@ Populated by the scripts in `/ingest`, in order:
   neuron metadata attached to nodes. Produced by `ingest/build_graph.py`.
 - `graph_stats.parquet` — per-node degree/betweenness centrality and detected
   community assignments. Produced by `ingest/compute_graph_stats.py`.
+- `graph_summary.json` — graph-level stats (node/edge counts, density,
+  average shortest path length, community count) for the stats panel.
+  Produced by `ingest/compute_graph_stats.py`.
 - `embeddings.parquet` — node2vec embeddings and their 2D projection
   (PCA/UMAP) per neuron. Produced by `ingest/compute_embeddings.py`.
 
