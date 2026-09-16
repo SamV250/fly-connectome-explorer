@@ -6,7 +6,7 @@
 # repo, since that environment's network policy blocks huggingface.co).
 #
 # Usage:
-#   ./deploy_to_space.sh <hf-space-git-url> [data-artifacts-tarball]
+#   ./deploy_to_space.sh <hf-space-url> [data-artifacts-tarball]
 #
 # Example:
 #   ./deploy_to_space.sh https://huggingface.co/spaces/alice/fly-connectome-explorer \
@@ -17,30 +17,39 @@
 # also missing, it runs the /ingest pipeline from scratch instead (downloads
 # ~880 MB from Zenodo and trains node2vec - expect several minutes).
 #
-# What it does:
-#   1. Clones this GitHub repo and the target HF Space repo into a temp dir.
-#   2. Copies the repo's code into the Space repo (everything except .git).
-#   3. Populates the Space repo's data/ directory, either by extracting the
-#      given tarball or by running the ingest pipeline.
-#   4. Commits and pushes to the Space.
+# Authentication: set HF_TOKEN to a Hugging Face access token with write
+# access (https://huggingface.co/settings/tokens) before running this, e.g.
+# `export HF_TOKEN=hf_xxxxx`. If unset, falls back to any token already
+# cached by a prior `huggingface-cli login`.
 #
-# Requires: git, rsync, tar. Uses python3 + a venv only if it has to run the
-# ingest pipeline (no cached artifacts available).
+# What it does:
+#   1. Clones this GitHub repo into a temp dir and assembles the deployable
+#      contents (code + data artifacts) in a local folder.
+#   2. Uploads that folder to the target Space via the Hugging Face Hub API
+#      (huggingface_hub.upload_folder), not raw git - this avoids needing
+#      git-lfs/Xet set up locally, which a plain `git push` of the binary
+#      data artifacts otherwise gets rejected without.
+#
+# Requires: git, rsync, tar, python3. Installs huggingface_hub (and, only if
+# it has to run the ingest pipeline, this repo's requirements.txt) into a
+# throwaway venv - nothing is installed into your regular Python environment.
 
 set -euo pipefail
 
 GITHUB_REPO_URL="https://github.com/SamV250/fly-connectome-explorer.git"
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: $0 <hf-space-git-url> [data-artifacts-tarball]" >&2
+    echo "Usage: $0 <hf-space-url> [data-artifacts-tarball]" >&2
     echo "Example: $0 https://huggingface.co/spaces/<user>/<space-name>" >&2
     exit 1
 fi
 
 SPACE_URL="$1"
 TARBALL="${2:-./precomputed_data_artifacts.tar.gz}"
+REPO_ID="${SPACE_URL#https://huggingface.co/spaces/}"
+REPO_ID="${REPO_ID%/}"
 
-for cmd in git rsync tar; do
+for cmd in git rsync tar python3; do
     command -v "$cmd" >/dev/null 2>&1 || { echo "Error: '$cmd' is required but not found." >&2; exit 1; }
 done
 
@@ -50,35 +59,25 @@ trap 'rm -rf "$WORKDIR"' EXIT
 echo "==> Cloning source repo: $GITHUB_REPO_URL"
 git clone --depth 1 "$GITHUB_REPO_URL" "$WORKDIR/source"
 
-echo "==> Cloning Space repo: $SPACE_URL"
-git clone "$SPACE_URL" "$WORKDIR/space"
+DEPLOY_DIR="$WORKDIR/deploy"
+mkdir -p "$DEPLOY_DIR"
+echo "==> Assembling deployable app code"
+rsync -a --exclude='.git' --exclude='data/' "$WORKDIR/source/" "$DEPLOY_DIR/"
 
-echo "==> Copying app code into the Space repo"
-rsync -a --exclude='.git' --exclude='.gitignore' --exclude='data/' "$WORKDIR/source/" "$WORKDIR/space/"
+mkdir -p "$DEPLOY_DIR/data"
 
-# The source repo's .gitignore excludes data/* (by design - it keeps large
-# generated artifacts out of GitHub). Copying it verbatim into the Space
-# would make `git add` silently skip the very artifacts this script just
-# placed in data/, so the Space repo gets its own, permissive one instead.
-cat > "$WORKDIR/space/.gitignore" <<'GITIGNORE'
-data/raw/
-.venv/
-__pycache__/
-*.pyc
-GITIGNORE
-
-mkdir -p "$WORKDIR/space/data"
+python3 -m venv "$WORKDIR/venv"
+# shellcheck disable=SC1091
+source "$WORKDIR/venv/bin/activate"
+pip install -q -U huggingface_hub
 
 if [[ -f "$TARBALL" ]]; then
     echo "==> Extracting precomputed artifacts from $TARBALL"
-    tar xzf "$TARBALL" -C "$WORKDIR/space/data"
+    tar xzf "$TARBALL" -C "$DEPLOY_DIR/data"
 else
     echo "==> No artifact tarball found at $TARBALL; running the ingest pipeline instead"
     echo "    (this downloads ~880 MB from Zenodo and trains node2vec - a few minutes)"
 
-    python3 -m venv "$WORKDIR/venv"
-    # shellcheck disable=SC1091
-    source "$WORKDIR/venv/bin/activate"
     pip install -q -r "$WORKDIR/source/requirements.txt"
 
     PYTHONPATH="$WORKDIR/source/ingest" python3 "$WORKDIR/source/ingest/fetch_connectome.py"
@@ -90,29 +89,32 @@ else
        "$WORKDIR/source/data/graph_stats.parquet" \
        "$WORKDIR/source/data/graph_summary.json" \
        "$WORKDIR/source/data/embeddings.parquet" \
-       "$WORKDIR/space/data/"
-
-    deactivate
+       "$DEPLOY_DIR/data/"
 fi
 
-cp "$WORKDIR/source/data/README.md" "$WORKDIR/space/data/README.md"
-
-echo "==> Committing and pushing to the Space"
-cd "$WORKDIR/space"
-git add -A
+cp "$WORKDIR/source/data/README.md" "$DEPLOY_DIR/data/README.md"
 
 for artifact in graph.gpickle graph_stats.parquet graph_summary.json embeddings.parquet; do
-    if [[ ! -f "data/$artifact" ]]; then
-        echo "Error: data/$artifact is missing - the Space would fail to start. Aborting before commit." >&2
+    if [[ ! -f "$DEPLOY_DIR/data/$artifact" ]]; then
+        echo "Error: data/$artifact is missing - the Space would fail to start. Aborting before upload." >&2
         exit 1
     fi
-    git ls-files --error-unmatch "data/$artifact" >/dev/null 2>&1 || git add -f "data/$artifact"
 done
 
-if git diff --cached --quiet; then
-    echo "Nothing changed - Space is already up to date."
-else
-    git commit -m "Deploy Fly Connectome Explorer"
-    git push
-    echo "==> Pushed. The Space will rebuild automatically at $SPACE_URL"
-fi
+echo "==> Uploading to Space: $REPO_ID"
+python3 - "$DEPLOY_DIR" "$REPO_ID" <<'PYEOF'
+import sys
+from huggingface_hub import HfApi
+
+folder_path, repo_id = sys.argv[1], sys.argv[2]
+api = HfApi()
+api.upload_folder(
+    folder_path=folder_path,
+    repo_id=repo_id,
+    repo_type="space",
+    commit_message="Deploy Fly Connectome Explorer",
+)
+print(f"==> Uploaded. The Space will rebuild automatically at https://huggingface.co/spaces/{repo_id}")
+PYEOF
+
+deactivate
