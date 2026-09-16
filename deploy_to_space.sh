@@ -104,16 +104,35 @@ done
 echo "==> Uploading to Space: $REPO_ID"
 python3 - "$DEPLOY_DIR" "$REPO_ID" <<'PYEOF'
 import sys
-from huggingface_hub import HfApi
+from pathlib import Path
 
-folder_path, repo_id = sys.argv[1], sys.argv[2]
+from huggingface_hub import CommitOperationAdd, HfApi
+
+folder_path, repo_id = Path(sys.argv[1]), sys.argv[2]
+
+# Built as explicit per-file "add" operations via create_commit rather than
+# upload_folder(): upload_folder diffs the local folder against the repo's
+# current state and skips any file it believes is already present, and that
+# check can be fooled if a *previous, ultimately-rejected* push already
+# transferred the same blob content into the Hub's storage backend (this
+# happens with plain `git push` when Hugging Face's pre-receive hook rejects
+# the ref update for containing untracked binary files, but only after the
+# objects were already received). create_commit has no such shortcut: since
+# these paths don't yet exist in the repo's tree, it must add them.
+operations = [
+    CommitOperationAdd(path_in_repo=path.relative_to(folder_path).as_posix(), path_or_fileobj=str(path))
+    for path in sorted(folder_path.rglob("*"))
+    if path.is_file()
+]
+
 api = HfApi()
-api.upload_folder(
-    folder_path=folder_path,
+commit_info = api.create_commit(
     repo_id=repo_id,
     repo_type="space",
+    operations=operations,
     commit_message="Deploy Fly Connectome Explorer",
 )
+print(f"==> Committed {commit_info.oid}")
 print(f"==> Uploaded. The Space will rebuild automatically at https://huggingface.co/spaces/{repo_id}")
 PYEOF
 
