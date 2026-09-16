@@ -1,0 +1,14 @@
+pandas
+pyarrow
+numpy
+networkx
+node2vec
+scikit-learn
+umap-learn
+python-louvain
+plotly
+pyvis
+gradio
+requests
+tqdm
+fafbseg
