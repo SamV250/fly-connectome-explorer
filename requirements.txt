@@ -1,0 +1,10 @@
+pandas
+pyarrow
+numpy
+networkx>=2.8
+node2vec
+scikit-learn
+umap-learn
+plotly
+gradio
+requests
