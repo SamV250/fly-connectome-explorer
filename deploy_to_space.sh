@@ -54,7 +54,18 @@ echo "==> Cloning Space repo: $SPACE_URL"
 git clone "$SPACE_URL" "$WORKDIR/space"
 
 echo "==> Copying app code into the Space repo"
-rsync -a --exclude='.git' --exclude='data/' "$WORKDIR/source/" "$WORKDIR/space/"
+rsync -a --exclude='.git' --exclude='.gitignore' --exclude='data/' "$WORKDIR/source/" "$WORKDIR/space/"
+
+# The source repo's .gitignore excludes data/* (by design - it keeps large
+# generated artifacts out of GitHub). Copying it verbatim into the Space
+# would make `git add` silently skip the very artifacts this script just
+# placed in data/, so the Space repo gets its own, permissive one instead.
+cat > "$WORKDIR/space/.gitignore" <<'GITIGNORE'
+data/raw/
+.venv/
+__pycache__/
+*.pyc
+GITIGNORE
 
 mkdir -p "$WORKDIR/space/data"
 
@@ -89,6 +100,15 @@ cp "$WORKDIR/source/data/README.md" "$WORKDIR/space/data/README.md"
 echo "==> Committing and pushing to the Space"
 cd "$WORKDIR/space"
 git add -A
+
+for artifact in graph.gpickle graph_stats.parquet graph_summary.json embeddings.parquet; do
+    if [[ ! -f "data/$artifact" ]]; then
+        echo "Error: data/$artifact is missing - the Space would fail to start. Aborting before commit." >&2
+        exit 1
+    fi
+    git ls-files --error-unmatch "data/$artifact" >/dev/null 2>&1 || git add -f "data/$artifact"
+done
+
 if git diff --cached --quiet; then
     echo "Nothing changed - Space is already up to date."
 else
