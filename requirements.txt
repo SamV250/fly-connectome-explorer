@@ -6,8 +6,5 @@ node2vec
 scikit-learn
 umap-learn
 plotly
-pyvis
 gradio
 requests
-tqdm
-fafbseg

@@ -10,6 +10,10 @@ assignments, and writes:
 - ``data/graph_summary.json`` - graph-level stats (node/edge counts,
   density, average shortest path length) for the tab's stats panel.
 
+Also precomputes a 2D spring layout for every node, so the Graph Theory
+tab's interactive visualization only has to plot cached coordinates rather
+than run graph layout at request time.
+
 Betweenness centrality and average shortest path length are computed on the
 unweighted topology (standard hop-count shortest paths), matching the usual
 graph-theory definitions of these metrics. Louvain community detection uses
@@ -48,7 +52,8 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
     :param graph: hub subgraph, as built by ``build_graph.py``.
     :returns: DataFrame indexed by node ID with columns ``in_degree``,
         ``out_degree``, ``total_synapse_degree``, ``betweenness``,
-        ``community``, and the node metadata columns in
+        ``community``, ``layout_x``/``layout_y`` (precomputed spring
+        layout position), and the node metadata columns in
         :data:`build_graph.NODE_METADATA_COLUMNS`.
     """
     betweenness = nx.betweenness_centrality(graph, weight=None, normalized=True)
@@ -60,6 +65,8 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
         for node_id in members:
             community_of[node_id] = community_id
 
+    layout = nx.spring_layout(undirected, weight="syn_count", seed=42)
+
     rows = []
     for node_id, data in graph.nodes(data=True):
         row = {
@@ -70,6 +77,8 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
             "betweenness": betweenness[node_id],
             "community": community_of[node_id],
             "primary_neuropil": data.get("primary_neuropil"),
+            "layout_x": layout[node_id][0],
+            "layout_y": layout[node_id][1],
         }
         for col in NODE_METADATA_COLUMNS:
             row[col] = data.get(col)
