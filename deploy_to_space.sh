@@ -133,7 +133,24 @@ commit_info = api.create_commit(
     commit_message="Deploy Fly Connectome Explorer",
 )
 print(f"==> Committed {commit_info.oid}")
-print(f"==> Uploaded. The Space will rebuild automatically at https://huggingface.co/spaces/{repo_id}")
+
+# Verify directly through the API - not a browser page, so it can't be
+# stale/cached - that the commit we just made actually put these files
+# where the app expects them.
+remote_files = set(api.list_repo_files(repo_id=repo_id, repo_type="space"))
+required = {
+    "data/graph.gpickle",
+    "data/graph_stats.parquet",
+    "data/graph_summary.json",
+    "data/embeddings.parquet",
+}
+missing = required - remote_files
+if missing:
+    print(f"ERROR: commit {commit_info.oid} landed, but the API still doesn't list: {sorted(missing)}", file=sys.stderr)
+    sys.exit(1)
+
+print("==> Verified: all 4 data artifacts are present in the repo per the API (not a cached page).")
+print(f"==> The Space will rebuild automatically at https://huggingface.co/spaces/{repo_id}")
 PYEOF
 
 deactivate
