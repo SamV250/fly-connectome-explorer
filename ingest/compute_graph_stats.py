@@ -10,7 +10,7 @@ assignments, and writes:
 - ``data/graph_summary.json`` - graph-level stats (node/edge counts,
   density, average shortest path length) for the tab's stats panel.
 
-Also precomputes a 2D spring layout for every node, so the Graph Theory
+Also precomputes a 3D spring layout for every node, so the Graph Theory
 tab's interactive visualization only has to plot cached coordinates rather
 than run graph layout at request time.
 
@@ -52,8 +52,8 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
     :param graph: hub subgraph, as built by ``build_graph.py``.
     :returns: DataFrame indexed by node ID with columns ``in_degree``,
         ``out_degree``, ``total_synapse_degree``, ``betweenness``,
-        ``community``, ``layout_x``/``layout_y`` (precomputed spring
-        layout position), and the node metadata columns in
+        ``community``, ``layout_x``/``layout_y``/``layout_z`` (precomputed
+        3D spring layout position), and the node metadata columns in
         :data:`build_graph.NODE_METADATA_COLUMNS`.
     """
     betweenness = nx.betweenness_centrality(graph, weight=None, normalized=True)
@@ -65,7 +65,7 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
         for node_id in members:
             community_of[node_id] = community_id
 
-    layout = nx.spring_layout(undirected, weight="syn_count", seed=42)
+    layout = nx.spring_layout(undirected, weight="syn_count", seed=42, dim=3)
 
     rows = []
     for node_id, data in graph.nodes(data=True):
@@ -79,6 +79,7 @@ def compute_node_stats(graph: nx.DiGraph) -> pd.DataFrame:
             "primary_neuropil": data.get("primary_neuropil"),
             "layout_x": layout[node_id][0],
             "layout_y": layout[node_id][1],
+            "layout_z": layout[node_id][2],
         }
         for col in NODE_METADATA_COLUMNS:
             row[col] = data.get(col)

@@ -101,30 +101,34 @@ def build_leaderboard_dataframe() -> pd.DataFrame:
 
 
 def build_network_figure() -> go.Figure:
-    """Build an interactive subgraph visualization colored by community.
+    """Build an interactive 3D subgraph visualization colored by community.
 
-    Node positions come from the spring layout precomputed in
-    ``compute_graph_stats.py``. Only the ``EDGE_DISPLAY_LIMIT`` strongest
-    edges (by synapse count) are drawn, to keep the plot legible.
+    Node positions come from the 3D spring layout precomputed in
+    ``compute_graph_stats.py`` - a force-directed layout based purely on
+    graph topology, distinct from :func:`build_anatomical_figure`'s real
+    brain coordinates. Only the ``EDGE_DISPLAY_LIMIT`` strongest edges (by
+    synapse count) are drawn, to keep the plot legible.
 
-    :returns: a Plotly figure with edge lines and community-colored node
-        markers.
+    :returns: a draggable/rotatable Plotly 3D figure with edge lines and
+        community-colored node markers.
     """
     edges = sorted(_graph.edges(data=True), key=lambda e: e[2]["syn_count"], reverse=True)
     edges = edges[:EDGE_DISPLAY_LIMIT]
 
-    edge_x, edge_y = [], []
+    edge_x, edge_y, edge_z = [], [], []
     for source, target, _ in edges:
         edge_x += [_stats_df.loc[source, "layout_x"], _stats_df.loc[target, "layout_x"], None]
         edge_y += [_stats_df.loc[source, "layout_y"], _stats_df.loc[target, "layout_y"], None]
+        edge_z += [_stats_df.loc[source, "layout_z"], _stats_df.loc[target, "layout_z"], None]
 
     fig = go.Figure()
     fig.add_trace(
-        go.Scattergl(
+        go.Scatter3d(
             x=edge_x,
             y=edge_y,
+            z=edge_z,
             mode="lines",
-            line=dict(width=0.5, color="rgba(150,150,150,0.3)"),
+            line=dict(width=1, color="rgba(150,150,150,0.3)"),
             hoverinfo="none",
             showlegend=False,
         )
@@ -136,21 +140,25 @@ def build_network_figure() -> go.Figure:
             for node_id, row in group.iterrows()
         ]
         fig.add_trace(
-            go.Scattergl(
+            go.Scatter3d(
                 x=group["layout_x"],
                 y=group["layout_y"],
+                z=group["layout_z"],
                 mode="markers",
                 name=f"Community {community_id}",
                 text=hover_text,
                 hoverinfo="text",
-                marker=dict(size=7, color=_community_color(community_id)),
+                marker=dict(size=4, color=_community_color(community_id)),
             )
         )
 
     fig.update_layout(
         title=f"Hub subgraph, top {len(edges):,} edges by synapse count, colored by community",
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+        ),
         margin=dict(t=40),
     )
     return fig
@@ -238,6 +246,11 @@ def build() -> None:
             with gr.Column(scale=2):
                 gr.Plot(build_degree_distribution_figure())
 
+        gr.Markdown(
+            "#### Interactive 3D network layout\n"
+            "Drag to rotate. Positions come from a force-directed layout based "
+            "purely on wiring - who's connected to whom, not where they sit in the brain."
+        )
         gr.Plot(build_network_figure())
 
         gr.Markdown(
