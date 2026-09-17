@@ -52,6 +52,9 @@ NODE_METADATA_COLUMNS = [
     "side",
     "nerve",
     "top_nt",
+    "pos_x",
+    "pos_y",
+    "pos_z",
 ]
 
 

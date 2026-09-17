@@ -23,9 +23,10 @@ not a combined brain+VNC BANC release; see [Data source](#data-source) below.
 ## Tabs
 
 1. **Graph Theory** — degree distribution, a hub-neuron centrality
-   leaderboard, an interactive subgraph visualization colored by detected
-   community, and summary stats (node/edge counts, density, average path
-   length) on the analyzed subgraph.
+   leaderboard, two interactive subgraph visualizations colored by detected
+   community (a force-directed layout, and the same neurons at their real
+   3D position in the FlyWire brain), and summary stats (node/edge counts,
+   density, average path length) on the analyzed subgraph.
 2. **Neuron Embeddings** — a 2D projection of node2vec embeddings colored by
    known cell type/region, a neuron-ID search box that highlights nearest
    neighbors in embedding space, and a note on how structural similarity

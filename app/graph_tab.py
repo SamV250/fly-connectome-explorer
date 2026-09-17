@@ -1,8 +1,9 @@
 """Graph Theory tab for the Gradio app.
 
-Renders degree distribution, a hub-neuron centrality leaderboard, an
-interactive subgraph visualization colored by detected community, and a
-summary stats panel - all sourced from ``data/graph_stats.parquet``,
+Renders degree distribution, a hub-neuron centrality leaderboard, two
+interactive subgraph visualizations colored by detected community (one
+force-directed, one at each neuron's real 3D brain position), and a summary
+stats panel - all sourced from ``data/graph_stats.parquet``,
 ``data/graph_summary.json``, and ``data/graph.gpickle``. Loads its cached
 artifacts once at import time; every callback below only re-reads
 in-memory DataFrames/figures, no graph algorithms run per request.
@@ -155,6 +156,70 @@ def build_network_figure() -> go.Figure:
     return fig
 
 
+def build_anatomical_figure() -> go.Figure:
+    """Build a 3D scatter of the hub subgraph at each neuron's real brain position.
+
+    Uses each neuron's ``pos_x``/``pos_y``/``pos_z`` (nanometers, in the
+    FlyWire FAFB14.1 template space) instead of a force-directed layout, so
+    the plot reads as "where in the brain" rather than "how it's wired" -
+    complementary to :func:`build_network_figure`. Same community coloring
+    and edge-thinning approach as the topological view.
+
+    :returns: a Plotly 3D scatter figure, draggable/rotatable in the browser.
+    """
+    edges = sorted(_graph.edges(data=True), key=lambda e: e[2]["syn_count"], reverse=True)
+    edges = edges[:EDGE_DISPLAY_LIMIT]
+
+    edge_x, edge_y, edge_z = [], [], []
+    for source, target, _ in edges:
+        edge_x += [_stats_df.loc[source, "pos_x"], _stats_df.loc[target, "pos_x"], None]
+        edge_y += [_stats_df.loc[source, "pos_y"], _stats_df.loc[target, "pos_y"], None]
+        edge_z += [_stats_df.loc[source, "pos_z"], _stats_df.loc[target, "pos_z"], None]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter3d(
+            x=edge_x,
+            y=edge_y,
+            z=edge_z,
+            mode="lines",
+            line=dict(width=1, color="rgba(150,150,150,0.25)"),
+            hoverinfo="none",
+            showlegend=False,
+        )
+    )
+
+    for community_id, group in _stats_df.groupby("community"):
+        hover_text = [
+            f"{node_id}<br>{row.cell_type or 'unknown'} ({row.super_class or 'unknown'})<br>{row.primary_neuropil or 'unknown'}"
+            for node_id, row in group.iterrows()
+        ]
+        fig.add_trace(
+            go.Scatter3d(
+                x=group["pos_x"],
+                y=group["pos_y"],
+                z=group["pos_z"],
+                mode="markers",
+                name=f"Community {community_id}",
+                text=hover_text,
+                hoverinfo="text",
+                marker=dict(size=3, color=_community_color(community_id)),
+            )
+        )
+
+    fig.update_layout(
+        title=f"Hub subgraph at real brain position (FAFB14.1 space), top {len(edges):,} edges, colored by community",
+        scene=dict(
+            xaxis_title="x (nm)",
+            yaxis_title="y (nm)",
+            zaxis_title="z (nm)",
+            aspectmode="data",
+        ),
+        margin=dict(t=40),
+    )
+    return fig
+
+
 def build() -> None:
     """Add the Graph Theory tab's components to the enclosing ``gr.Blocks``.
 
@@ -174,6 +239,13 @@ def build() -> None:
                 gr.Plot(build_degree_distribution_figure())
 
         gr.Plot(build_network_figure())
+
+        gr.Markdown(
+            "#### Same subgraph, mapped onto real brain position\n"
+            "Drag to rotate. Positions are each neuron's location in the FlyWire "
+            "FAFB14.1 template space (nanometers), not a layout algorithm."
+        )
+        gr.Plot(build_anatomical_figure())
 
         gr.Markdown(f"#### Top {LEADERBOARD_SIZE} neurons by betweenness centrality")
         gr.Dataframe(build_leaderboard_dataframe())
