@@ -119,18 +119,26 @@ folder_path, repo_id = Path(sys.argv[1]), sys.argv[2]
 # the ref update for containing untracked binary files, but only after the
 # objects were already received). create_commit has no such shortcut: since
 # these paths don't yet exist in the repo's tree, it must add them.
+files = [path for path in sorted(folder_path.rglob("*")) if path.is_file()]
 operations = [
-    CommitOperationAdd(path_in_repo=path.relative_to(folder_path).as_posix(), path_or_fileobj=str(path))
-    for path in sorted(folder_path.rglob("*"))
-    if path.is_file()
+    CommitOperationAdd(path_in_repo=path.relative_to(folder_path).as_posix(), path_or_fileobj=path.read_bytes())
+    for path in files
 ]
 
+print(f"==> {len(operations)} operations built locally:")
+for path, op in zip(files, operations):
+    print(f"    {op.path_in_repo}  ({len(op.path_or_fileobj)} bytes)")
+
 api = HfApi()
+# A distinct commit message (with the local file count baked in) rules out
+# any chance this specific request gets treated as a duplicate of an
+# earlier one - some commit-tracking systems dedupe on message+parent, not
+# just tree content.
 commit_info = api.create_commit(
     repo_id=repo_id,
     repo_type="space",
     operations=operations,
-    commit_message="Deploy Fly Connectome Explorer",
+    commit_message=f"Deploy Fly Connectome Explorer ({len(operations)} files)",
 )
 print(f"==> Committed {commit_info.oid}")
 
